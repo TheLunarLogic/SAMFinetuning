@@ -1,0 +1,1 @@
+cdn_server_address = 'cdn-qcb3iv2gaa-uc.a.run.app:443'
