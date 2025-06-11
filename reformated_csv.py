@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 
-def transformed_csv(input,splits):
+def reformated_csv(input,splits):
 
   for split in splits:
       input_file = os.path.join(input, f"{split}.csv")
