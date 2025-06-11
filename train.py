@@ -1,15 +1,25 @@
 import os
-import argparse
-import math
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from torch.utils.data import DataLoader
 
-from dataset import SAMPointPromptDataset
+# Your classes are assumed to be defined in the notebook or imported directly:
+# SAMPointPromptDataset, SAMForSemanticSegmentation, SemanticSegmentationLitModule, StructureLoss
+
+# This code is referenced from: 
+# https://github.com/autogluon/autogluon/blob/master/multimodal/src/autogluon/multimodal/models/sam.py
 from sam_model import SAMForSemanticSegmentation
-from lit_module import SemanticSegmentationLitModule
+
+# https://github.com/autogluon/autogluon/blob/master/multimodal/src/autogluon/multimodal/optim/losses/structure_loss.py
 from loss import StructureLoss
+
+# https://github.com/autogluon/autogluon/blob/master/multimodal/src/autogluon/multimodal/optim/lit_module.py
+from lit_module import SemanticSegmentationLitModule
+
+from dataset import SAMPointPromptDataset
+
+
 
 def get_trainable_params_efficient_finetune(norm_param_names, efficient_finetune, extra_params=None):
     """Get trainable parameter names for efficient fine-tuning, following AutoGluon's implementation"""
@@ -36,112 +46,97 @@ def get_norm_layer_param_names(model):
             norm_param_names.extend([f"{name}.weight", f"{name}.bias"])
     return norm_param_names
 
-def main():
-    parser = argparse.ArgumentParser(description='Train SAM with LoRA using point prompts')
-    parser.add_argument('--train_csv', type=str, required=True, help='Path to training CSV file')
-    parser.add_argument('--val_csv', type=str, default=None, help='Path to validation CSV file')
-    parser.add_argument('--checkpoint', type=str, default='facebook/sam-vit-base', help='SAM checkpoint name or path')
-    parser.add_argument('--save_dir', type=str, default='./checkpoints', help='Directory to save checkpoints')
-    parser.add_argument('--batch_size', type=int, default=2, help='Batch size per GPU')
-    parser.add_argument('--num_epochs', type=int, default=30, help='Number of training epochs')
-    parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate')
-    parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay')
-    parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
-    parser.add_argument('--image_size', type=int, default=1024, help='Size to resize images to')
-    parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
-    parser.add_argument('--num_gpus', type=int, default=1, help='Number of GPUs to use')
-    
-    args = parser.parse_args()
-    
-    # Create save directory
-    os.makedirs(args.save_dir, exist_ok=True)
-    
-    # Create datasets
-    train_dataset = SAMPointPromptDataset(args.train_csv, image_size=args.image_size)
-    val_dataset = SAMPointPromptDataset(args.val_csv, image_size=args.image_size) if args.val_csv else None
-    
-    # Create data loaders
+
+def run_training(args):
+    os.makedirs(args['save_dir'], exist_ok=True)
+
+    # Access dictionary elements using square brackets []
+    train_dataset = SAMPointPromptDataset(args['train_csv'], image_size=args['image_size'])
+    # Access dictionary elements using square brackets []
+    val_dataset = SAMPointPromptDataset(args['val_csv'], image_size=args['image_size']) if args['val_csv'] else None
+
     train_loader = DataLoader(
         train_dataset,
-        batch_size=args.batch_size,
+        # Access dictionary elements using square brackets []
+        batch_size=args['batch_size'],
         shuffle=True,
-        num_workers=args.num_workers
+        # Access dictionary elements using square brackets []
+        num_workers=args['num_workers']
     )
-    
+
     val_loader = DataLoader(
         val_dataset,
-        batch_size=args.batch_size,
+        # Access dictionary elements using square brackets []
+        batch_size=args['batch_size'],
         shuffle=False,
-        num_workers=args.num_workers
+        # Access dictionary elements using square brackets []
+        num_workers=args['num_workers']
     ) if val_dataset else None
-    
-    # Create model
+
     model = SAMForSemanticSegmentation(
-        checkpoint_name=args.checkpoint,
+        # Access dictionary elements using square brackets []
+        checkpoint_name=args['checkpoint'],
         num_classes=1,
         pretrained=True,
-        # Use the frozen layers from your config
         frozen_layers=["mask_decoder.iou_prediction_head", "prompt_encoder"]
     )
-    
-    # Get trainable parameter names for LoRA
+
     norm_param_names = get_norm_layer_param_names(model)
     trainable_param_names = get_trainable_params_efficient_finetune(
         norm_param_names=norm_param_names,
         efficient_finetune="lora",
-        extra_params=[".*mask_decoder"]  # From your config
+        extra_params=[".*mask_decoder"]
     )
-    
-    # Create loss function
+
     loss_func = StructureLoss()
-    
-    # Create Lightning module
+
     lit_module = SemanticSegmentationLitModule(
         model=model,
         loss_func=loss_func,
         trainable_param_names=trainable_param_names,
         optim_type="adamw",
-        lr=args.learning_rate,
-        weight_decay=args.weight_decay,
+        # Access dictionary elements using square brackets []
+        lr=args['learning_rate'],
+        # Access dictionary elements using square brackets []
+        weight_decay=args['weight_decay'],
         validation_metric="iou",
         validation_metric_name="iou"
     )
-    
-    # Create callbacks
+
     checkpoint_callback = ModelCheckpoint(
-        dirpath=args.save_dir,
+        # Access dictionary elements using square brackets []
+        dirpath=args['save_dir'],
         filename='sam-lora-{epoch:02d}-{val_iou:.4f}',
-        save_top_k=3,  # From your config
+        save_top_k=3,
         verbose=True,
         monitor='val_iou',
         mode='max'
     )
-    
+
     early_stopping_callback = EarlyStopping(
         monitor='val_iou',
-        patience=args.patience,  # From your config
+        # Access dictionary elements using square brackets []
+        patience=args['patience'],
         mode='max',
         verbose=True
     )
-    
-    # Create trainer
+
     trainer = pl.Trainer(
-        max_epochs=args.num_epochs,
+        # Access dictionary elements using square brackets []
+        max_epochs=args['num_epochs'],
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-        devices=min(args.num_gpus, torch.cuda.device_count()) if torch.cuda.is_available() else None,
-        strategy='ddp_find_unused_parameters_true' if args.num_gpus > 1 else 'auto',  # Match your config
+        # Access dictionary elements using square brackets []
+        devices=min(args['num_gpus'], torch.cuda.device_count()) if torch.cuda.is_available() else None,
+        # Access dictionary elements using square brackets []
+        strategy='ddp_find_unused_parameters_true' if args['num_gpus'] > 1 else 'auto',
         callbacks=[checkpoint_callback, early_stopping_callback],
-        default_root_dir=args.save_dir,
-        precision='16-mixed' if torch.cuda.is_available() else 32,  # Match your config
+        # Access dictionary elements using square brackets []
+        default_root_dir=args['save_dir'],
+        precision='16-mixed' if torch.cuda.is_available() else 32,
     )
-    
-    # Train model
+
     trainer.fit(lit_module, train_loader, val_loader)
-    
-    # Save final model
-    trainer.save_checkpoint(os.path.join(args.save_dir, 'sam_lora_final.ckpt'))
-    
+    trainer.save_checkpoint(os.path.join(args['save_dir'], 'sam_lora_final.ckpt'))
+
     print(f"Training completed. Best model saved at: {checkpoint_callback.best_model_path}")
 
-if __name__ == '__main__':
-    main()
