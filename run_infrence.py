@@ -1,4 +1,4 @@
-# using base model
+# our fine-tuned model :
 
 import os
 import torch
@@ -11,28 +11,47 @@ from collections import Counter, defaultdict
 import ast
 import random
 from tqdm import tqdm
-from transformers import SamModel
 
-def calculate_iou(pred_mask, gt_mask):
+
+
+# Function to load the trained model
+def load_model_from_checkpoint(checkpoint_path):
     """
-    Calculate IoU between predicted and ground truth masks
+    Load a trained SAM model with LoRA weights from a checkpoint
     """
-    intersection = np.logical_and(pred_mask, gt_mask).sum()
-    union = np.logical_or(pred_mask, gt_mask).sum()
+    # Create the model
+    model = SAMForSemanticSegmentation(
+        checkpoint_name="facebook/sam-vit-base",  # Same as used in training
+        num_classes=1,
+        pretrained=True
+    )
 
-    if union == 0:
-        return 0.0
+    # Create the LitModule
+    lit_module = SemanticSegmentationLitModule(
+        model=model,
+        loss_func=StructureLoss()
+    )
 
-    return intersection / union
+    # Load the checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    lit_module.load_state_dict(checkpoint['state_dict'])
 
-def predict_mask_with_base_sam(model, image_path, points, device='cuda'):
+    # Set to evaluation mode
+    lit_module.eval()
+
+    return lit_module
+
+# Function to predict mask with point prompts
+def predict_mask_with_points(model, image_path, points, point_labels=None, device='cuda'):
     """
-    Predict a mask using the base SAM model with point prompts
+    Predict a mask for an image with point prompts
 
     Args:
-        model: The base SAM model from HuggingFace
+        model: The SAM model
         image_path: Path to the input image
         points: List of [x, y] coordinates on the original image scale
+        point_labels: List of point labels (1 for foreground, 0 for background)
+                     If None, all points are assumed to be foreground (1)
         device: Device to run inference on
 
     Returns:
@@ -41,13 +60,17 @@ def predict_mask_with_base_sam(model, image_path, points, device='cuda'):
     """
     # Load and preprocess the image
     image = Image.open(image_path).convert('RGB')
-    original_size = image.size  # (width, height)
+    original_size = image.size
 
-    # Resize image for SAM (1024x1024)
-    image_size = 1024
+    # If point_labels not provided, assume all points are foreground
+    if point_labels is None:
+        point_labels = [1] * len(points)
+
+    # Resize to model's expected size
+    image_size = model.model.image_size
     image_resized = image.resize((image_size, image_size), Image.BILINEAR)
 
-    # Preprocess image
+    # Convert to tensor and normalize
     from torchvision import transforms
     transform = transforms.Compose([
         transforms.ToTensor(),
@@ -63,22 +86,27 @@ def predict_mask_with_base_sam(model, image_path, points, device='cuda'):
     for point in points:
         scaled_points.append([point[0] * scale_x, point[1] * scale_y])
 
-    # Format points for SAM
-    input_points = torch.tensor([[scaled_points]], dtype=torch.float).to(device)
-    input_labels = torch.ones((1, 1, len(points)), dtype=torch.long).to(device)  # All points are foreground
+    # Format points for SAM - correct shape: [batch_size, point_batch_size, nb_points_per_image, 2]
+    points_tensor = torch.tensor([[scaled_points]], dtype=torch.float).to(device)  # Shape: [1, 1, num_points, 2]
+    point_labels_tensor = torch.tensor([[point_labels]], dtype=torch.long).to(device)  # Shape: [1, 1, num_points]
 
-    # Generate mask prediction
+    # Create batch with points
+    batch = {
+        'sam_image': image_tensor,
+        'sam_points': points_tensor,
+        'sam_point_labels': point_labels_tensor
+    }
+
+    # Run inference
     with torch.no_grad():
-        outputs = model(
-            pixel_values=image_tensor,
-            input_points=input_points,
-            input_labels=input_labels,
-            multimask_output=False
-        )
+        outputs = model(batch)
 
-    # Get the predicted mask
-    pred_mask = torch.sigmoid(outputs.pred_masks[:, 0, :, :, :])
-    pred_mask = (pred_mask > 0.5).float()
+    # Extract mask prediction
+    prefix = list(outputs.keys())[0]
+    logits = outputs[prefix]["logits"]
+
+    # Convert to binary mask
+    pred_mask = (torch.sigmoid(logits) > 0.5).float()
 
     # Resize back to original image size
     pred_mask = F.interpolate(
@@ -88,11 +116,25 @@ def predict_mask_with_base_sam(model, image_path, points, device='cuda'):
         align_corners=False
     )
 
-    # Convert to numpy
+    # Convert to numpy array
     pred_mask = pred_mask.squeeze().cpu().numpy()
 
     return pred_mask, image
 
+# Function to calculate IoU between predicted and ground truth masks
+def calculate_iou(pred_mask, gt_mask):
+    """
+    Calculate IoU between predicted and ground truth masks
+    """
+    intersection = np.logical_and(pred_mask, gt_mask).sum()
+    union = np.logical_or(pred_mask, gt_mask).sum()
+
+    if union == 0:
+        return 0.0
+
+    return intersection / union
+
+# Function to visualize results with points and ground truth
 def visualize_results(image, pred_mask, gt_mask, points, iou, class_name):
     """
     Visualize the image, predicted mask, and ground truth mask with points
@@ -109,7 +151,7 @@ def visualize_results(image, pred_mask, gt_mask, points, iou, class_name):
 
     # Plot predicted mask
     axes[1].imshow(pred_mask, cmap='gray')
-    axes[1].set_title(f'Base SAM Predicted Mask (IoU: {iou:.4f})')
+    axes[1].set_title(f'Fine-tuned SAM Predicted Mask (IoU: {iou:.4f})')
     axes[1].axis('off')
 
     # Plot ground truth mask
@@ -127,11 +169,22 @@ def select_samples(test_df, num_samples=30):
     """
     # Extract class names from image paths
     def extract_class_name(path):
-        parts = path.split('/')
-        for part in parts:
-            if part.startswith('Class_'):
-                return part
+        # Check if the path starts with 'dataset_yolo'
+        if path.startswith('dataset_yolo'):
+            parts = path.split('/')
+            if len(parts) > 1:
+                # parts[1] should be something like "53_Grains"
+                class_folder = parts[1]
+                # Return the digits before the underscore, e.g. "53"
+                return class_folder.split('_')[0]
+        else:
+            # Fallback for other paths: look for parts starting with "Class_"
+            parts = path.split('/')
+            for part in parts:
+                if part.startswith('Class_'):
+                    return part
         return 'Unknown'
+
 
     test_df['class'] = test_df['image'].apply(extract_class_name)
 
@@ -191,21 +244,20 @@ def select_samples(test_df, num_samples=30):
     # Return the selected samples
     return selected_samples
 
-def main_function(test , output):
+def modified_main_function(checkpoint_path , test_df , output_dir):
     # Set the device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
 
-    # Load the base SAM model
-    print("Loading base SAM model...")
-    model = SamModel.from_pretrained("facebook/sam-vit-base")
-    model.to(device)
-    model.eval()
-    print("Base SAM model loaded successfully!")
+    # Load the model
+    checkpoint_path = checkpoint_path
+    model = load_model_from_checkpoint(checkpoint_path)
+    model = model.to(device)
+    print("Model loaded successfully!")
+
 
     # Load test.csv
-       # Load test.csv
-    test_df = test
+    test_df = pd.read_csv(test_df)
     print(f"Loaded {len(test_df)} test samples")
 
     # Select samples - using fixed seed for reproducibility
@@ -213,7 +265,7 @@ def main_function(test , output):
     print(f"Selected {len(selected_samples)} samples for evaluation")
 
     # Create output directory for visualizations
-    output_dir = output
+    output_dir = output_dir
     os.makedirs(output_dir, exist_ok=True)
 
     # Run inference on selected samples
@@ -226,8 +278,8 @@ def main_function(test , output):
         # Parse points from string representation
         points = ast.literal_eval(sample['points'])
 
-        # Predict mask with points using base SAM
-        pred_mask, image = predict_mask_with_base_sam(model, image_path, points, device=device)
+        # Predict mask with points
+        pred_mask, image = predict_mask_with_points(model, image_path, points, device=device)
 
         # Load ground truth mask
         gt_mask = np.array(Image.open(mask_path).convert('L')) > 0
@@ -268,15 +320,15 @@ def main_function(test , output):
     avg_iou = results_df['iou'].mean()
 
     # Print summary
-    print("\nBase SAM Inference Results Summary:")
+    print("\nFine-tuned SAM Inference Results Summary:")
     print(f"Overall Average IoU: {avg_iou:.4f}")
     print("\nAverage IoU per Class:")
     for _, row in class_iou.iterrows():
         print(f"{row['class']}: {row['iou']:.4f}")
 
     # Save results to CSV
-    results_df.to_csv(os.path.join(output_dir, 'base_sam_results.csv'), index=False)
-    class_iou.to_csv(os.path.join(output_dir, 'base_sam_class_iou_summary.csv'), index=False)
+    results_df.to_csv(os.path.join(output_dir, 'finetuned_sam_results.csv'), index=False)
+    class_iou.to_csv(os.path.join(output_dir, 'finetuned_sam_class_iou_summary.csv'), index=False)
 
     print(f"\nResults saved to {output_dir}")
     print(f"Visualizations for {len(results_df)} samples saved to {output_dir}")
