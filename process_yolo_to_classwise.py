@@ -77,7 +77,7 @@ def process_image_and_label(image_path, label_path, class_mapping, counter_dict)
             cv2.imwrite(os.path.join(class_dir, "images", f"{base_filename}.png"), cropped_image)
             cv2.imwrite(os.path.join(class_dir, "masks", f"{base_filename}.png"), cropped_mask)
 
-def process_yolo_to_clockwise():
+def process_yolo_to_classwise():
     global OUTPUT_DIR
     YOLO_VAL_DIR = find_yolo_dataset_dir()
     print(f"Detected YOLO dataset directory: {YOLO_VAL_DIR}")
