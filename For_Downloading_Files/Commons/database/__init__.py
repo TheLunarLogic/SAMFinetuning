@@ -1,1 +1,0 @@
-from .firestore import get_questions
