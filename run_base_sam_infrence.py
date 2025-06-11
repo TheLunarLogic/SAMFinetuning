@@ -191,7 +191,7 @@ def select_samples(test_df, num_samples=30):
     # Return the selected samples
     return selected_samples
 
-def main_function(test , output):
+def base_main_function(test , output):
     # Set the device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
