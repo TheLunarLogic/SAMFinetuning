@@ -1,0 +1,4 @@
+numpy>=1.19.0
+opencv-python>=4.5.0
+pycocotools>=2.0.4
+tqdm>=4.60.0 
