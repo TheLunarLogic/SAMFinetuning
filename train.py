@@ -46,36 +46,41 @@ def get_norm_layer_param_names(model):
             norm_param_names.extend([f"{name}.weight", f"{name}.bias"])
     return norm_param_names
 
+def run_training(
+    train_csv,
+    val_csv,
+    checkpoint="facebook/sam-vit-base",
+    save_dir="./checkpoints",
+    batch_size=2,
+    num_epochs=5,
+    learning_rate=0.0001,
+    weight_decay=0.0001,
+    patience=10,
+    image_size=1024,
+    num_workers=4,
+    num_gpus=1
+):
+    os.makedirs(save_dir, exist_ok=True)
 
-def run_training(args):
-    os.makedirs(args['save_dir'], exist_ok=True)
-
-    # Access dictionary elements using square brackets []
-    train_dataset = SAMPointPromptDataset(args['train_csv'], image_size=args['image_size'])
-    # Access dictionary elements using square brackets []
-    val_dataset = SAMPointPromptDataset(args['val_csv'], image_size=args['image_size']) if args['val_csv'] else None
+    train_dataset = SAMPointPromptDataset(train_csv, image_size=image_size)
+    val_dataset = SAMPointPromptDataset(val_csv, image_size=image_size) if val_csv else None
 
     train_loader = DataLoader(
         train_dataset,
-        # Access dictionary elements using square brackets []
-        batch_size=args['batch_size'],
+        batch_size=batch_size,
         shuffle=True,
-        # Access dictionary elements using square brackets []
-        num_workers=args['num_workers']
+        num_workers=num_workers
     )
 
     val_loader = DataLoader(
         val_dataset,
-        # Access dictionary elements using square brackets []
-        batch_size=args['batch_size'],
+        batch_size=batch_size,
         shuffle=False,
-        # Access dictionary elements using square brackets []
-        num_workers=args['num_workers']
+        num_workers=num_workers
     ) if val_dataset else None
 
     model = SAMForSemanticSegmentation(
-        # Access dictionary elements using square brackets []
-        checkpoint_name=args['checkpoint'],
+        checkpoint_name=checkpoint,
         num_classes=1,
         pretrained=True,
         frozen_layers=["mask_decoder.iou_prediction_head", "prompt_encoder"]
@@ -95,17 +100,14 @@ def run_training(args):
         loss_func=loss_func,
         trainable_param_names=trainable_param_names,
         optim_type="adamw",
-        # Access dictionary elements using square brackets []
-        lr=args['learning_rate'],
-        # Access dictionary elements using square brackets []
-        weight_decay=args['weight_decay'],
+        lr=learning_rate,
+        weight_decay=weight_decay,
         validation_metric="iou",
         validation_metric_name="iou"
     )
 
     checkpoint_callback = ModelCheckpoint(
-        # Access dictionary elements using square brackets []
-        dirpath=args['save_dir'],
+        dirpath=save_dir,
         filename='sam-lora-{epoch:02d}-{val_iou:.4f}',
         save_top_k=3,
         verbose=True,
@@ -115,28 +117,22 @@ def run_training(args):
 
     early_stopping_callback = EarlyStopping(
         monitor='val_iou',
-        # Access dictionary elements using square brackets []
-        patience=args['patience'],
+        patience=patience,
         mode='max',
         verbose=True
     )
 
     trainer = pl.Trainer(
-        # Access dictionary elements using square brackets []
-        max_epochs=args['num_epochs'],
+        max_epochs=num_epochs,
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-        # Access dictionary elements using square brackets []
-        devices=min(args['num_gpus'], torch.cuda.device_count()) if torch.cuda.is_available() else None,
-        # Access dictionary elements using square brackets []
-        strategy='ddp_find_unused_parameters_true' if args['num_gpus'] > 1 else 'auto',
+        devices=min(num_gpus, torch.cuda.device_count()) if torch.cuda.is_available() else None,
+        strategy='ddp_find_unused_parameters_true' if num_gpus > 1 else 'auto',
         callbacks=[checkpoint_callback, early_stopping_callback],
-        # Access dictionary elements using square brackets []
-        default_root_dir=args['save_dir'],
+        default_root_dir=save_dir,
         precision='16-mixed' if torch.cuda.is_available() else 32,
     )
 
     trainer.fit(lit_module, train_loader, val_loader)
-    trainer.save_checkpoint(os.path.join(args['save_dir'], 'sam_lora_final.ckpt'))
+    trainer.save_checkpoint(os.path.join(save_dir, 'sam_lora_final.ckpt'))
 
-    print(f"Training completed. Best model saved at: {checkpoint_callback.best_model_path}")
-
+    print(f"✅ Training completed. Best model saved at: {checkpoint_callback.best_model_path}")
