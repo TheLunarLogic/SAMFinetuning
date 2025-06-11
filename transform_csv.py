@@ -4,8 +4,8 @@ import os
 def transformed_csv(input,splits):
 
   for split in splits:
-      input_file = os.path.join(input_dir, f"{split}.csv")
-      output_file = os.path.join(input_dir, f"{split}_reformatted.csv")
+      input_file = os.path.join(input, f"{split}.csv")
+      output_file = os.path.join(input, f"{split}_reformatted.csv")
 
       print(f"Processing {input_file} -> {output_file}")
 
