@@ -254,7 +254,7 @@ def select_samples(test_df, num_samples=30):
     # Return the selected samples
     return selected_samples
 
-def modified_main_function(checkpoint_path , test_df , output_dir):
+def evaluate_finetuned_sam_model(checkpoint_path , test_df , output_dir):
     # Set the device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
