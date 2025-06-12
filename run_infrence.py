@@ -12,6 +12,16 @@ import ast
 import random
 from tqdm import tqdm
 
+# This code is referenced from: 
+# https://github.com/autogluon/autogluon/blob/master/multimodal/src/autogluon/multimodal/models/sam.py
+from sam_model import SAMForSemanticSegmentation
+
+# https://github.com/autogluon/autogluon/blob/master/multimodal/src/autogluon/multimodal/optim/losses/structure_loss.py
+from loss import StructureLoss
+
+# https://github.com/autogluon/autogluon/blob/master/multimodal/src/autogluon/multimodal/optim/lit_module.py
+from lit_module import SemanticSegmentationLitModule
+
 
 
 # Function to load the trained model
