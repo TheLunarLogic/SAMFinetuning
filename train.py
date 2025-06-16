@@ -46,7 +46,7 @@ def get_norm_layer_param_names(model):
             norm_param_names.extend([f"{name}.weight", f"{name}.bias"])
     return norm_param_names
 
-def run_training(
+def fine_tuning(
     train_csv,
     val_csv,
     checkpoint="facebook/sam-vit-base",
