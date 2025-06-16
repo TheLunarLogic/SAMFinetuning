@@ -9,15 +9,15 @@ from torch.utils.data import DataLoader
 
 # This code is referenced from: 
 # https://github.com/autogluon/autogluon/blob/master/multimodal/src/autogluon/multimodal/models/sam.py
-from sam_model import SAMForSemanticSegmentation
+from SAMFinetuning.sam_model import SAMForSemanticSegmentation
 
 # https://github.com/autogluon/autogluon/blob/master/multimodal/src/autogluon/multimodal/optim/losses/structure_loss.py
-from loss import StructureLoss
+from SAMFinetuning.loss import StructureLoss
 
 # https://github.com/autogluon/autogluon/blob/master/multimodal/src/autogluon/multimodal/optim/lit_module.py
-from lit_module import SemanticSegmentationLitModule
+from SAMFinetuning.lit_module import SemanticSegmentationLitModule
 
-from dataset import SAMPointPromptDataset
+from SAMFinetuning.dataset import SAMPointPromptDataset
 
 
 
